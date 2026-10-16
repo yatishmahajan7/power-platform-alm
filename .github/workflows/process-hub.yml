@@ -1,0 +1,41 @@
+name: Process Hub
+
+# Sample per-app workflow. Copy this file for every new app, change the
+# name and the three `with:` values, and you're done — no need to touch
+# the reusable CI/CD files.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "solutions/process-hub/**"
+  push:
+    branches: [main]
+    paths:
+      - "solutions/process-hub/**"
+  workflow_dispatch: {} # lets you run it manually from the Actions tab
+
+jobs:
+  ci:
+    uses: ./.github/workflows/_reusable-ci.yml
+    with:
+      solution_name: process-hub
+      dev_environment_url: https://<your-dev-env>.crm.dynamics.com
+    secrets:
+      POWER_PLATFORM_TENANT_ID: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+      POWER_PLATFORM_CLIENT_ID: ${{ secrets.POWER_PLATFORM_CLIENT_ID }}
+      POWER_PLATFORM_CLIENT_SECRET: ${{ secrets.POWER_PLATFORM_CLIENT_SECRET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  cd:
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/_reusable-cd.yml
+    with:
+      solution_name: process-hub
+      staging_environment_url: https://<your-staging-env>.crm.dynamics.com
+      production_environment_url: https://<your-production-env>.crm.dynamics.com
+    secrets:
+      POWER_PLATFORM_TENANT_ID: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+      POWER_PLATFORM_CLIENT_ID: ${{ secrets.POWER_PLATFORM_CLIENT_ID }}
+      POWER_PLATFORM_CLIENT_SECRET: ${{ secrets.POWER_PLATFORM_CLIENT_SECRET }}

@@ -1,0 +1,75 @@
+name: Reusable - Power Platform Solution CD
+
+# Deploys the managed solution artifact produced by _reusable-ci.yml into
+# Staging first, then Production behind a manual approval gate (GitHub
+# Environments -> add required reviewers on the "production" environment
+# in repo Settings -> Environments).
+
+on:
+  workflow_call:
+    inputs:
+      solution_name:
+        required: true
+        type: string
+      staging_environment_url:
+        required: true
+        type: string
+      production_environment_url:
+        required: true
+        type: string
+    secrets:
+      POWER_PLATFORM_TENANT_ID:
+        required: true
+      POWER_PLATFORM_CLIENT_ID:
+        required: true
+      POWER_PLATFORM_CLIENT_SECRET:
+        required: true
+
+jobs:
+  deploy-staging:
+    runs-on: windows-latest
+    environment: staging
+    steps:
+      - name: Download managed solution
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.solution_name }}-managed-solution
+          path: out
+
+      - name: Install Power Platform CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Import to Staging
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url: ${{ inputs.staging_environment_url }}
+          app-id: ${{ secrets.POWER_PLATFORM_CLIENT_ID }}
+          client-secret: ${{ secrets.POWER_PLATFORM_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+          path: out/${{ inputs.solution_name }}.zip
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: windows-latest
+    # "production" environment should have required reviewers configured
+    # in repo Settings -> Environments so this step waits for a human
+    # approval before running.
+    environment: production
+    steps:
+      - name: Download managed solution
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.solution_name }}-managed-solution
+          path: out
+
+      - name: Install Power Platform CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Import to Production
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url: ${{ inputs.production_environment_url }}
+          app-id: ${{ secrets.POWER_PLATFORM_CLIENT_ID }}
+          client-secret: ${{ secrets.POWER_PLATFORM_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+          path: out/${{ inputs.solution_name }}.zip

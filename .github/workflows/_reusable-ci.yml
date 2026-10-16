@@ -1,0 +1,101 @@
+name: Reusable - Power Platform Solution CI
+
+# Shared CI gate for every Power Platform app/solution in this repo.
+# A per-app workflow (see .github/workflows/example-app.yml) calls this
+# with `uses: ./.github/workflows/_reusable-ci.yml` and passes the
+# solution's folder name + target environment.
+#
+# Gate order: pack -> solution checker -> dependency check -> Claude review
+# Any failed gate stops the workflow; nothing gets published as an artifact
+# for the CD (staging/production) workflow to pick up.
+
+on:
+  workflow_call:
+    inputs:
+      solution_name:
+        description: "Folder name under /solutions and the Dataverse solution unique name"
+        required: true
+        type: string
+      dev_environment_url:
+        description: "Dev environment URL to export/validate against"
+        required: true
+        type: string
+    secrets:
+      POWER_PLATFORM_TENANT_ID:
+        required: true
+      POWER_PLATFORM_CLIENT_ID:
+        required: true
+      POWER_PLATFORM_CLIENT_SECRET:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+
+jobs:
+  ci:
+    runs-on: windows-latest # Solution Checker currently requires Windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Power Platform CLI
+        uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Auth to Dev environment
+        uses: microsoft/powerplatform-actions/who-am-i@v1
+        with:
+          environment-url: ${{ inputs.dev_environment_url }}
+          app-id: ${{ secrets.POWER_PLATFORM_CLIENT_ID }}
+          client-secret: ${{ secrets.POWER_PLATFORM_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+
+      - name: Pack solution
+        uses: microsoft/powerplatform-actions/pack-solution@v1
+        with:
+          solution-folder: solutions/${{ inputs.solution_name }}/src
+          solution-file: out/${{ inputs.solution_name }}.zip
+          solution-type: Managed
+
+      - name: Run Solution Checker
+        uses: microsoft/powerplatform-actions/check-solution@v1
+        with:
+          environment-url: ${{ inputs.dev_environment_url }}
+          app-id: ${{ secrets.POWER_PLATFORM_CLIENT_ID }}
+          client-secret: ${{ secrets.POWER_PLATFORM_CLIENT_SECRET }}
+          tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+          path: out/${{ inputs.solution_name }}.zip
+          outputDirectory: out/checker-results
+          # Fail the job if Solution Checker finds high or critical issues
+          failOnBlocker: true
+
+      - name: Dependency check
+        shell: pwsh
+        run: |
+          ./scripts/dependency-check.ps1 `
+            -SolutionZip "out/${{ inputs.solution_name }}.zip" `
+            -SourceFolder "solutions/${{ inputs.solution_name }}/src"
+
+      - name: Claude review (canvas app / formula quality)
+        shell: pwsh
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          pip install anthropic --quiet
+          python scripts/claude_review.py `
+            --source "solutions/${{ inputs.solution_name }}/src" `
+            --app-name "${{ inputs.solution_name }}" `
+            --output "out/claude-review.md"
+
+      - name: Publish review + checker results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.solution_name }}-ci-results
+          path: |
+            out/checker-results/**
+            out/claude-review.md
+
+      - name: Publish managed solution (only on success)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.solution_name }}-managed-solution
+          path: out/${{ inputs.solution_name }}.zip
